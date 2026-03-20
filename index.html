@@ -5,10 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>興嘉閱讀護照 | 雲端試算表整合版</title>
     
-    <!-- 解決 favicon 404 紅色錯誤的可愛小書圖示 -->
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📖</text></svg>">
     
-    <!-- 引入 Tailwind 與相關 UI 套件 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -37,10 +35,9 @@
 
     <script type="text/babel">
         // =========================================================================
-        // 🌟 核心設定區：已成功為您換上專屬的 GAS 網址！
-        // =========================================================================
+        // ⚠️ 這裡的 GAS_URL 已經幫您設定好，請勿更動 ⚠️
         const GAS_URL = "https://script.google.com/macros/s/AKfycbzpwetN6q2kiFDd1OZJfvfaPibKjIRBMfq7cHbzaUTOcDe6JigPskhuBSvaSIl63ezP/exec"; 
-        const CONFIG = { ADMIN_PWD: "123" };
+        const CONFIG = { ADMIN_PWD: "123" }; // 後台預設密碼
         // =========================================================================
 
         const LOADING_QUOTES = [
@@ -48,18 +45,28 @@
             "正在從圖書館搬書過來... 🏃‍♂️", "每一本書，都是一場冒險... 🗺️", "雲端資料同步中... ☁️"
         ];
 
-        const { useState, useEffect, useCallback, useMemo } = React;
+        const { useState, useEffect, useCallback, useMemo, useRef } = React;
 
+        // 🌟 核心修復：使用 dangerouslySetInnerHTML 隔離 React 與 Lucide，防止切換畫面時崩潰 (白畫面殺手)
         const Icon = ({ name, size = 20, className = "" }) => {
-            useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [name]);
-            return <i data-lucide={name} style={{ width: size, height: size }} className={className}></i>;
+            useEffect(() => { 
+                if (window.lucide) window.lucide.createIcons(); 
+            });
+            return (
+                <span 
+                    className={`inline-flex items-center justify-center ${className}`}
+                    dangerouslySetInnerHTML={{ __html: `<i data-lucide="${name}" style="width: ${size}px; height: ${size}px;"></i>` }}
+                />
+            );
         };
 
         function App() {
+            // --- 狀態管理 (State) ---
             const [view, setView] = useState('home');
             const [loading, setLoading] = useState(false);
             const [records, setRecords] = useState([]);
             const [isAdmin, setIsAdmin] = useState(false);
+            const [adminPw, setAdminPw] = useState(''); 
             const [adminTab, setAdminTab] = useState('pending');
             const [isLoggedIn, setIsLoggedIn] = useState(false);
             const [student, setStudent] = useState({ classId: '', name: '' });
@@ -76,15 +83,16 @@
             });
             const [detail, setDetail] = useState(null);
 
-            // 處理載入中隨機文字
+            // --- 隨機載入文字 ---
             const currentLoadingText = useMemo(() => {
                 if (!loading) return "系統處理中...";
                 return LOADING_QUOTES[Math.floor(Math.random() * LOADING_QUOTES.length)];
             }, [loading]);
 
+            // --- 姓名遮蔽工具 ---
             const mask = (s) => (s && s.length > 1) ? s[0] + 'O' + (s.length > 2 ? s.slice(2) : '') : s;
 
-            // 🌟 透過 GAS 讀取 Google 試算表資料
+            // --- 讀取 Google Sheets 資料 ---
             const fetchData = useCallback(async () => {
                 setLoading(true);
                 try {
@@ -92,8 +100,8 @@
                     const json = await res.json();
                     setRecords(json.records || []);
                     if(json.config) {
-                        setSlogan(json.config.slogan);
-                        setSloganSub(json.config.sloganSub);
+                        setSlogan(json.config.slogan || "讀萬卷書，行萬里路");
+                        setSloganSub(json.config.sloganSub || "興嘉小達人，讓我們一起探索書中的奇幻世界！");
                     }
                 } catch (e) { 
                     console.error("讀取 Google Sheets 失敗:", e); 
@@ -101,32 +109,31 @@
                 setLoading(false);
             }, []);
 
+            // 初始載入
             useEffect(() => { fetchData(); }, [fetchData]);
 
-            // 🌟 透過 GAS 將資料寫入 Google 試算表
+            // --- 與 Google Apps Script 互動 (新增/修改/刪除/審核/設定) ---
             const handleBackendAction = async (action, id = null, data = null) => {
                 setLoading(true);
                 try {
                     const res = await fetch(GAS_URL, {
                         method: "POST",
                         body: JSON.stringify({ action: action, id: id, payload: data }),
-                        // 避免被瀏覽器擋下跨域 (CORS) 預檢請求
                         headers: { "Content-Type": "text/plain;charset=utf-8" } 
                     });
                     const result = await res.json();
 
                     if (result.success) {
                         if (action === 'addRecord') {
-                            setTimeout(() => { alert("心得已提交審核！"); handleLogout(); }, 500);
+                            setTimeout(() => { alert("心得已提交審核！"); setView('passport'); }, 500);
                         } else if (action === 'updateConfig') {
                             setTimeout(() => alert("首頁金句已成功同步至雲端！"), 500);
                         } else if (action === 'importBatch') {
                             alert("批量匯入成功！");
                         }
                         
-                        // 執行完更新動作後，重新拉取最新資料更新畫面
-                        if (action !== 'addRecord' && action !== 'updateConfig') {
-                            await fetchData();
+                        if (action !== 'updateConfig') {
+                            await fetchData(); // 重新整理資料
                         }
                     } else {
                         throw new Error(result.error);
@@ -138,13 +145,14 @@
                 setLoading(false);
             };
 
+            // --- Excel 匯出 ---
             const exportToExcel = () => {
                 const dataToExport = records.map(r => ({
                     '編號': r.id, '班級': r.classId, '姓名': r.name, '書名': r.bookTitle,
                     '作者': r.author, '出版社': r.publisher, '頁數': r.pages,
                     '心得內容': r.reviewType === 'image' ? `(圖片已上傳)` : r.review,
                     '狀態': r.status === 'approved' ? '已核准' : '審核中',
-                    '時間': new Date(r.timestamp).toLocaleString('zh-TW')
+                    '時間': r.timestamp ? new Date(r.timestamp).toLocaleString('zh-TW') : ''
                 }));
                 const worksheet = XLSX.utils.json_to_sheet(dataToExport);
                 const workbook = XLSX.utils.book_new();
@@ -152,6 +160,7 @@
                 XLSX.writeFile(workbook, `興嘉閱讀護照_${new Date().toLocaleDateString()}.xlsx`);
             };
 
+            // --- Excel 匯入 ---
             const importFromExcel = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
@@ -181,7 +190,7 @@
                 reader.readAsArrayBuffer(file);
             };
 
-            // 🌟 圖片自動壓縮功能 (避免塞爆 Google 試算表的格子限制)
+            // --- 圖片壓縮與上傳處理 ---
             const handleImageUpload = (e) => {
                 const file = e.target.files[0];
                 if (file) {
@@ -190,14 +199,13 @@
                         const img = new Image();
                         img.onload = () => {
                             const canvas = document.createElement('canvas');
-                            const MAX_WIDTH = 600; // 壓縮寬度
+                            const MAX_WIDTH = 600; // 壓縮圖片寬度以節省傳輸量
                             const scaleSize = MAX_WIDTH / img.width;
                             canvas.width = MAX_WIDTH;
                             canvas.height = img.height * scaleSize;
                             const ctx = canvas.getContext('2d');
                             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                            // 壓縮成 JPG 以減少體積
-                            const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.6);
+                            const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.6); // 降低畫質至 60%
                             setFormData({...formData, image: compressedDataUrl});
                         }
                         img.src = ev.target.result;
@@ -206,6 +214,7 @@
                 }
             };
 
+            // --- 表單送出檢查 ---
             const handleFormSubmit = () => {
                 if (!formData.bookTitle || !formData.author || !formData.publisher || !formData.pages) return alert('「書名」、「作者」、「出版社」、「頁數」皆為必填項目！');
                 if (formData.reviewType === 'text' && (formData.review.length < 100 || formData.review.length > 500)) return alert('文字心得字數需介於 100 到 500 字之間。');
@@ -217,16 +226,22 @@
                 setIsFormOpen(false);
             };
 
-            const handleLogout = () => { setStudent({ classId: '', name: '' }); setIsLoggedIn(false); setView('home'); };
+            const handleLogout = () => { 
+                setStudent({ classId: '', name: '' }); 
+                setIsLoggedIn(false); 
+                setView('home'); 
+            };
 
-            const approvedRecords = useMemo(() => records.filter(r => String(r.status).toLowerCase() === 'approved'), [records]);
+            // --- 數據統計 (加入安全防護 r && ...) ---
+            const approvedRecords = useMemo(() => records.filter(r => r && String(r.status).toLowerCase() === 'approved'), [records]);
             const totalBooks = approvedRecords.length;
             const totalReviews = approvedRecords.length;
-            const totalStudents = useMemo(() => new Set(approvedRecords.map(r => r.classId + '_' + r.name)).size, [approvedRecords]);
+            const totalStudents = useMemo(() => new Set(approvedRecords.map(r => `${r.classId}_${r.name}`)).size, [approvedRecords]);
 
             const topStudents = useMemo(() => {
                 const counts = {};
                 approvedRecords.forEach(r => {
+                    if(!r) return;
                     const key = `${r.classId}_${r.name}`;
                     counts[key] = (counts[key] || 0) + 1;
                 });
@@ -237,6 +252,7 @@
             const gradeStats = useMemo(() => {
                 const g = { "一年級":0, "二年級":0, "三年級":0, "四年級":0, "五年級":0, "六年級":0 };
                 approvedRecords.forEach(r => {
+                    if(!r) return;
                     const gId = String(r.classId)[0];
                     const label = ["","一","二","三","四","五","六"][gId] + "年級";
                     if(g[label]!==undefined) g[label]++;
@@ -246,8 +262,10 @@
 
             const latestReviews = useMemo(() => approvedRecords.slice(-5).reverse(), [approvedRecords]);
 
+            // --- 介面渲染 (Render) ---
             return (
                 <div className="min-h-screen pb-32">
+                    {/* Header */}
                     <header className="glass sticky top-0 z-50 border-b p-5 flex justify-between items-center">
                         <div onClick={()=>setView('home')} className="cursor-pointer flex items-center gap-3">
                             <div className="bg-amber-400 p-2 rounded-xl text-white shadow-inner font-black"><Icon name="book-open" size={24}/></div>
@@ -260,9 +278,11 @@
                     </header>
 
                     <main className="max-w-6xl mx-auto p-4 md:p-8 space-y-6">
-                        {/* --- 視圖：首頁 --- */}
+                        
+                        {/* ======================= 首頁 (Home) ======================= */}
                         {view === 'home' && (
                             <div className="space-y-6 animate-in fade-in duration-500">
+                                {/* 大標語橫幅 */}
                                 <div className="bg-gradient-to-br from-amber-500 to-orange-600 rounded-[3rem] p-12 text-center shadow-xl relative overflow-hidden">
                                     <h2 className="text-4xl md:text-5xl font-black text-white drop-shadow-lg mb-4">{slogan}</h2>
                                     <p className="text-white/90 font-bold text-xl">{sloganSub}</p>
@@ -271,6 +291,7 @@
                                     )}
                                 </div>
 
+                                {/* 三大數據看板 */}
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     <div className="bg-white p-6 rounded-[2rem] border card-shadow flex flex-col items-center justify-center relative overflow-hidden">
                                         <div className="absolute -right-4 -top-4 opacity-5"><Icon name="book" size={100}/></div>
@@ -290,6 +311,7 @@
                                 </div>
 
                                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                                    {/* 閱讀小達人榜 */}
                                     <div className="lg:col-span-5 bg-white rounded-[2.5rem] p-8 border card-shadow">
                                         <h3 className="text-xl font-black flex items-center gap-2 mb-6"><Icon name="award" className="text-amber-400"/> 閱讀小達人榜</h3>
                                         <div className="space-y-3">
@@ -307,6 +329,7 @@
                                     </div>
 
                                     <div className="lg:col-span-7 flex flex-col gap-6">
+                                        {/* 各年級閱讀量長條圖 */}
                                         <div className="bg-white rounded-[2.5rem] p-8 border card-shadow">
                                             <h3 className="text-xl font-black mb-6 flex items-center gap-2"><Icon name="bar-chart-3" className="text-indigo-500"/> 各年級閱讀量</h3>
                                             <div className="grid grid-cols-2 gap-x-8 gap-y-6">
@@ -321,6 +344,7 @@
                                             </div>
                                         </div>
 
+                                        {/* 最新心得分享 */}
                                         <div className="bg-white rounded-[2.5rem] p-8 border card-shadow flex-1 flex flex-col">
                                             <h3 className="text-xl font-black mb-4 flex items-center gap-2"><Icon name="bookmark" className="text-rose-500"/> 最新心得分享</h3>
                                             <div className="space-y-3 flex-1">
@@ -344,9 +368,10 @@
                             </div>
                         )}
 
-                        {/* --- 視圖：個人護照登入與頁面 --- */}
+                        {/* ======================= 護照與登入頁 (Passport) ======================= */}
                         {view === 'passport' && (
                             !isLoggedIn ? (
+                                /* 學生登入介面 */
                                 <div className="bg-white p-12 rounded-[3rem] shadow-xl border max-w-md mx-auto mt-6 text-center animate-in zoom-in duration-300">
                                     <div className="w-20 h-20 bg-amber-100 text-amber-500 rounded-full flex items-center justify-center mx-auto mb-6"><Icon name="user" size={32}/></div>
                                     <h2 className="text-3xl font-black mb-8 text-slate-800">學生登入</h2>
@@ -363,6 +388,7 @@
                                     </div>
                                 </div>
                             ) : (
+                                /* 個人護照首頁 (已登入) */
                                 <div className="space-y-6 animate-in slide-in-from-bottom-8 duration-500">
                                     <div className="bg-white rounded-[3rem] p-10 border text-center shadow-sm relative overflow-hidden">
                                         <div className="absolute top-0 right-0 w-32 h-32 bg-amber-100 rounded-full blur-3xl -mr-10 -mt-10 opacity-50"></div>
@@ -378,7 +404,7 @@
                                             <button onClick={handleLogout} className="text-xs font-black text-rose-500 bg-rose-50 hover:bg-rose-100 px-4 py-2 rounded-xl transition-colors">登出</button>
                                         </div>
                                         <div className="space-y-3">
-                                            {records.filter(r => r.name === student.name).reverse().map(r => (
+                                            {records.filter(r => r && r.name === student.name).reverse().map(r => (
                                                 <div key={r.id} className="p-5 bg-slate-50 rounded-2xl flex justify-between items-center cursor-pointer hover:bg-white hover:shadow-md border border-transparent hover:border-slate-200 transition-all" onClick={() => setDetail(r)}>
                                                     <div>
                                                         <p className="font-black text-slate-700 text-lg">《{r.bookTitle}》</p>
@@ -392,7 +418,7 @@
                                                     </div>
                                                 </div>
                                             ))}
-                                            {records.filter(r => r.name === student.name).length === 0 && (
+                                            {records.filter(r => r && r.name === student.name).length === 0 && (
                                                 <div className="text-center py-10 text-slate-400 font-bold bg-slate-50 rounded-2xl border border-dashed">
                                                     還沒有任何紀錄，趕快點擊上方按鈕開始寫作吧！
                                                 </div>
@@ -403,14 +429,14 @@
                             )
                         )}
 
-                        {/* --- 視圖：後端管理系統 --- */}
+                        {/* ======================= 管理員後台 (Admin) ======================= */}
                         {view === 'admin' && (
                             !isAdmin ? (
                                 <div className="bg-white p-12 rounded-[3rem] shadow-xl border max-w-md mx-auto mt-6 text-center animate-in zoom-in duration-300">
                                     <div className="w-20 h-20 bg-slate-800 text-white rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg"><Icon name="shield" size={32}/></div>
                                     <h2 className="text-2xl font-black mb-8 text-slate-800">管理員驗證</h2>
-                                    <input type="password" id="pw" className="field-input text-center mb-6 tracking-[0.5em]" placeholder="請輸入密碼"/>
-                                    <button className="w-full py-5 bg-slate-800 hover:bg-slate-900 text-white font-black rounded-2xl shadow-xl transition-colors" onClick={() => { if(document.getElementById('pw').value===CONFIG.ADMIN_PWD) setIsAdmin(true); else alert('密碼錯誤'); }}>登入後台</button>
+                                    <input type="password" value={adminPw} onChange={(e)=>setAdminPw(e.target.value)} className="field-input text-center mb-6 tracking-[0.5em]" placeholder="請輸入密碼"/>
+                                    <button className="w-full py-5 bg-slate-800 hover:bg-slate-900 text-white font-black rounded-2xl shadow-xl transition-colors" onClick={() => { if(adminPw===CONFIG.ADMIN_PWD) { setIsAdmin(true); setAdminPw(''); } else alert('密碼錯誤'); }}>登入後台</button>
                                 </div>
                             ) : (
                                 <div className="space-y-6 animate-in slide-in-from-bottom-8 duration-500">
@@ -419,6 +445,7 @@
                                         <button onClick={() => setIsAdmin(false)} className="p-4 bg-rose-50 hover:bg-rose-100 text-rose-500 rounded-2xl transition-colors"><Icon name="log-out"/></button>
                                     </div>
 
+                                    {/* 系統標語設定區塊 */}
                                     <div className="bg-white p-8 rounded-[2.5rem] border card-shadow space-y-6 relative overflow-hidden">
                                         <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-50 rounded-full blur-3xl -mr-10 -mt-10 opacity-50 pointer-events-none"></div>
                                         <h3 className="font-black text-xl flex items-center gap-2 relative z-10"><Icon name="cloud" className="text-indigo-500"/> 首頁雲端金句設定</h3>
@@ -462,7 +489,7 @@
                                         </div>
 
                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                            {records.filter(r => r.status === adminTab).reverse().map(r => (
+                                            {records.filter(r => r && r.status === adminTab).reverse().map(r => (
                                                 <div key={r.id} className="bg-slate-50 hover:bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col gap-4">
                                                     <div className="flex justify-between items-start">
                                                         <div onClick={()=>setDetail(r)} className="cursor-pointer flex-1 mr-2">
@@ -480,7 +507,7 @@
                                                     {adminTab==='pending' && <button onClick={() => handleBackendAction('approveRecord', r.id)} className="w-full py-3 bg-green-500 hover:bg-green-600 text-white rounded-xl font-black text-sm transition-colors shadow-sm flex items-center justify-center gap-2"><Icon name="check-circle" size={16}/> 核准通過</button>}
                                                 </div>
                                             ))}
-                                            {records.filter(r => r.status === adminTab).length === 0 && (
+                                            {records.filter(r => r && r.status === adminTab).length === 0 && (
                                                 <div className="col-span-full text-center py-10 text-slate-400 font-bold border-2 border-dashed border-slate-200 rounded-[2rem]">
                                                     目前沒有{adminTab==='pending'?'待審核':'已通過'}的資料。
                                                 </div>
@@ -492,7 +519,7 @@
                         )}
                     </main>
 
-                    {/* 底部導覽按鈕 */}
+                    {/* ======================= 下方浮動導覽列 (Bottom Navigation) ======================= */}
                     <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-[360px] glass rounded-full p-2 flex shadow-[0_20px_40px_-15px_rgba(0,0,0,0.2)] border border-white/50 z-50">
                         {['home','passport','admin'].map(v => (
                             <button key={v} onClick={() => setView(v)} className={`flex-1 flex flex-col items-center py-3.5 rounded-full transition-all duration-300 ${view===v?'nav-active scale-105':'text-slate-400 hover:text-amber-500'}`}>
@@ -502,7 +529,7 @@
                         ))}
                     </nav>
 
-                    {/* Modal：所有心得牆 */}
+                    {/* ======================= 彈出視窗：所有心得列表 ======================= */}
                     {isAllReviewsOpen && (
                         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
                             <div className="bg-white w-full max-w-5xl rounded-[3rem] p-8 md:p-10 max-h-[90vh] overflow-y-auto shadow-2xl relative custom-scrollbar">
@@ -523,7 +550,7 @@
                         </div>
                     )}
 
-                    {/* 🌟 Modal：寫作與編輯表單 (文字/拍照 二擇一) */}
+                    {/* ======================= 彈出視窗：填寫/編輯心得表單 ======================= */}
                     {isFormOpen && (
                         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
                             <div className="bg-white w-full max-w-3xl rounded-[3rem] p-8 md:p-12 max-h-[90vh] overflow-y-auto shadow-2xl relative custom-scrollbar">
@@ -538,7 +565,6 @@
                                     </div>
                                     
                                     <div className="pt-8 border-t-2 border-slate-100">
-                                        {/* 繳交方式按鈕區塊 */}
                                         <label className="field-label mb-4">繳交方式 <span className="text-rose-500">*</span> (二選一)</label>
                                         <div className="flex bg-slate-100 p-2 rounded-2xl gap-2 mb-6">
                                             <button className={`flex-1 py-4 rounded-xl font-black text-lg transition-all flex items-center justify-center gap-2 ${formData.reviewType === 'text' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:bg-slate-200'}`} onClick={()=>setFormData({...formData, reviewType:'text'})}>
@@ -549,7 +575,6 @@
                                             </button>
                                         </div>
 
-                                        {/* 根據選擇動態切換欄位 */}
                                         {formData.reviewType === 'text' ? (
                                             <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
                                                 <label className="field-label flex justify-between items-center text-sm"><span>心得內容 (100-500字)</span><span className={`text-xs font-black px-3 py-1 rounded-full shadow-sm ${ (formData.review.length < 100 || formData.review.length > 500) ? 'bg-rose-100 text-rose-600' : 'bg-green-100 text-green-600' }`}>{formData.review.length} 字</span></label>
@@ -582,7 +607,7 @@
                         </div>
                     )}
 
-                    {/* Modal：檢視單篇心得詳情 */}
+                    {/* ======================= 彈出視窗：閱讀心得詳細內容 ======================= */}
                     {detail && (
                         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[110] flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={()=>setDetail(null)}>
                             <div className="bg-white w-full max-w-2xl rounded-[3rem] p-8 md:p-12 shadow-2xl relative max-h-[90vh] overflow-y-auto custom-scrollbar" onClick={e=>e.stopPropagation()}>
@@ -612,7 +637,7 @@
                         </div>
                     )}
 
-                    {/* 🌟 帶有隨機語錄的轉圈圈動畫 */}
+                    {/* ======================= 載入動畫 (Loading) ======================= */}
                     {loading && (
                         <div className="fixed inset-0 bg-white/80 backdrop-blur-sm z-[200] flex flex-col items-center justify-center animate-in fade-in duration-200">
                             <div className="relative w-24 h-24 mb-6">
