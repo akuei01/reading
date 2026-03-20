@@ -5,8 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>興嘉閱讀護照 | 雲端試算表整合版</title>
     
+    <!-- 解決 favicon 404 紅色錯誤的可愛小書圖示 -->
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📖</text></svg>">
     
+    <!-- 引入 Tailwind 與相關 UI 套件 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -35,10 +37,10 @@
 
     <script type="text/babel">
         // =========================================================================
-        // 🌟 核心設定區：請將下方的 GAS_URL 換成您的「網頁應用程式網址」！
+        // 🌟 核心設定區：已成功為您換上專屬的 GAS 網址！
         // =========================================================================
-        const GAS_URL = "https://script.google.com/macros/s/AKfycbzpwetN6q2kiFDd1OZJfvfaPibKjIRBMfq7cHbzaUTOcDe6JigPskhuBSvaSIl63ezP/exec)"; 
-        const CONFIG = { ADMIN_PWD: "S2860885*110" }; // 後台管理員密碼
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbzpwetN6q2kiFDd1OZJfvfaPibKjIRBMfq7cHbzaUTOcDe6JigPskhuBSvaSIl63ezP/exec"; 
+        const CONFIG = { ADMIN_PWD: "123" };
         // =========================================================================
 
         const LOADING_QUOTES = [
@@ -74,6 +76,7 @@
             });
             const [detail, setDetail] = useState(null);
 
+            // 處理載入中隨機文字
             const currentLoadingText = useMemo(() => {
                 if (!loading) return "系統處理中...";
                 return LOADING_QUOTES[Math.floor(Math.random() * LOADING_QUOTES.length)];
@@ -81,7 +84,7 @@
 
             const mask = (s) => (s && s.length > 1) ? s[0] + 'O' + (s.length > 2 ? s.slice(2) : '') : s;
 
-            // 🌟 讀取資料
+            // 🌟 透過 GAS 讀取 Google 試算表資料
             const fetchData = useCallback(async () => {
                 setLoading(true);
                 try {
@@ -100,13 +103,14 @@
 
             useEffect(() => { fetchData(); }, [fetchData]);
 
-            // 🌟 寫入與操作資料
+            // 🌟 透過 GAS 將資料寫入 Google 試算表
             const handleBackendAction = async (action, id = null, data = null) => {
                 setLoading(true);
                 try {
                     const res = await fetch(GAS_URL, {
                         method: "POST",
                         body: JSON.stringify({ action: action, id: id, payload: data }),
+                        // 避免被瀏覽器擋下跨域 (CORS) 預檢請求
                         headers: { "Content-Type": "text/plain;charset=utf-8" } 
                     });
                     const result = await res.json();
@@ -119,6 +123,8 @@
                         } else if (action === 'importBatch') {
                             alert("批量匯入成功！");
                         }
+                        
+                        // 執行完更新動作後，重新拉取最新資料更新畫面
                         if (action !== 'addRecord' && action !== 'updateConfig') {
                             await fetchData();
                         }
@@ -175,7 +181,7 @@
                 reader.readAsArrayBuffer(file);
             };
 
-            // 圖片自動壓縮
+            // 🌟 圖片自動壓縮功能 (避免塞爆 Google 試算表的格子限制)
             const handleImageUpload = (e) => {
                 const file = e.target.files[0];
                 if (file) {
@@ -184,12 +190,13 @@
                         const img = new Image();
                         img.onload = () => {
                             const canvas = document.createElement('canvas');
-                            const MAX_WIDTH = 600; 
+                            const MAX_WIDTH = 600; // 壓縮寬度
                             const scaleSize = MAX_WIDTH / img.width;
                             canvas.width = MAX_WIDTH;
                             canvas.height = img.height * scaleSize;
                             const ctx = canvas.getContext('2d');
                             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                            // 壓縮成 JPG 以減少體積
                             const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.6);
                             setFormData({...formData, image: compressedDataUrl});
                         }
@@ -199,18 +206,10 @@
                 }
             };
 
-            // 🌟 送出表單 (防呆檢查：二擇一)
             const handleFormSubmit = () => {
                 if (!formData.bookTitle || !formData.author || !formData.publisher || !formData.pages) return alert('「書名」、「作者」、「出版社」、「頁數」皆為必填項目！');
-                
-                // 文字心得的檢查
-                if (formData.reviewType === 'text' && (formData.review.length < 100 || formData.review.length > 500)) {
-                    return alert('文字心得字數需介於 100 到 500 字之間。');
-                }
-                // 照片心得的檢查
-                if (formData.reviewType === 'image' && !formData.image) {
-                    return alert('請點擊相機圖示，拍照或選擇照片上傳！');
-                }
+                if (formData.reviewType === 'text' && (formData.review.length < 100 || formData.review.length > 500)) return alert('文字心得字數需介於 100 到 500 字之間。');
+                if (formData.reviewType === 'image' && !formData.image) return alert('請點擊相機圖示，拍照或選擇照片上傳！');
 
                 const action = isEditMode ? 'updateRecord' : 'addRecord';
                 const payload = isEditMode ? formData : { ...formData, name: student.name, classId: student.classId };
