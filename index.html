@@ -29,13 +29,15 @@
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
 
-        /* 證書專用特效 */
         .cert-border {
             border: 15px solid transparent;
             border-image: repeating-linear-gradient(45deg, #f59e0b, #f59e0b 10px, #fff 10px, #fff 20px) 15;
         }
         @keyframes float { 0% { transform: translateY(0px); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0px); } }
         .animate-float { animation: float 3s ease-in-out infinite; }
+        
+        /* 超出兩行顯示刪節號 */
+        .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     </style>
 </head>
 <body>
@@ -60,12 +62,19 @@
             return <span className={`inline-flex items-center justify-center ${className}`} dangerouslySetInnerHTML={{ __html: `<i data-lucide="${name}" style="width: ${size}px; height: ${size}px;"></i>` }} />;
         };
 
-        // --- 🦋 蛻變階段邏輯計算 ---
         const getReadingStage = (count) => {
             if (count <= 10) return { name: '卵期', emoji: '🥚', desc: '閱讀的種子正在萌芽', next: 11, max: 10, min: 0, color: 'from-slate-300 to-slate-400', textColor: 'text-slate-600', bg: 'bg-slate-100', progress: (count / 10) * 100 };
             if (count <= 30) return { name: '幼蟲期', emoji: '🐛', desc: '努力吸收知識養分', next: 31, max: 30, min: 11, color: 'from-green-400 to-emerald-500', textColor: 'text-emerald-700', bg: 'bg-emerald-50', progress: ((count - 10) / 20) * 100 };
             if (count <= 60) return { name: '蛹期', emoji: '🥜', desc: '沉澱與蛻變中', next: 61, max: 60, min: 31, color: 'from-amber-400 to-orange-500', textColor: 'text-amber-700', bg: 'bg-amber-50', progress: ((count - 30) / 30) * 100 };
             return { name: '成蟲期', emoji: '🦋', desc: '展翅飛翔的閱讀達人！', next: 'MAX', max: count, min: 61, color: 'from-sky-400 to-indigo-500', textColor: 'text-indigo-700', bg: 'bg-indigo-50', progress: 100 };
+        };
+
+        // 隱私保護：姓名中間用O代替
+        const maskName = (name) => {
+            if (!name) return '';
+            if (name.length <= 2) return name[0] + 'O';
+            if (name.length === 3) return name[0] + 'O' + name[2];
+            return name[0] + 'O'.repeat(name.length - 2) + name[name.length - 1];
         };
 
         function App() {
@@ -89,7 +98,6 @@
             const [detail, setDetail] = useState(null);
 
             const currentLoadingText = useMemo(() => LOADING_QUOTES[Math.floor(Math.random() * LOADING_QUOTES.length)], [loading]);
-            const mask = (s) => (s && s.length > 1) ? s[0] + 'O' + (s.length > 2 ? s.slice(2) : '') : s;
 
             const fetchData = useCallback(async () => {
                 setLoading(true);
@@ -186,10 +194,58 @@
 
             const approvedRecords = useMemo(() => records.filter(r => r && String(r.status).toLowerCase() === 'approved'), [records]);
             
-            // 學生專屬數據
             const myRecords = useMemo(() => records.filter(r => r && r.name === student.name && r.classId === student.classId).reverse(), [records, student]);
             const myApprovedCount = useMemo(() => myRecords.filter(r => r.status === 'approved').length, [myRecords]);
             const currentStage = useMemo(() => getReadingStage(myApprovedCount), [myApprovedCount]);
+
+            // ================= 新增：首頁數據統計區塊邏輯 =================
+
+            // 1. 排行榜 (Top 10)
+            const leaderboard = useMemo(() => {
+                const counts = {};
+                approvedRecords.forEach(r => {
+                    const key = `${r.classId}_${r.name}`;
+                    counts[key] = (counts[key] || 0) + 1;
+                });
+                return Object.entries(counts)
+                    .map(([key, count]) => {
+                        const [classId, name] = key.split('_');
+                        return { classId, name, count };
+                    })
+                    .sort((a, b) => b.count - a.count)
+                    .slice(0, 10);
+            }, [approvedRecords]);
+
+            // 2. 年級分析
+            const gradeStats = useMemo(() => {
+                const stats = {};
+                approvedRecords.forEach(r => {
+                    // 擷取班級的第一碼作為年級 (如 305 -> 3)
+                    const gradeStr = r.classId ? String(r.classId).charAt(0) : '';
+                    const gradeNum = parseInt(gradeStr);
+                    if (!isNaN(gradeNum) && gradeNum >= 1 && gradeNum <= 6) {
+                         stats[gradeNum] = (stats[gradeNum] || 0) + 1;
+                    } else {
+                         stats['其他'] = (stats['其他'] || 0) + 1;
+                    }
+                });
+                return Object.entries(stats).map(([grade, count]) => ({
+                    grade: grade === '其他' ? '其他' : `${grade}年級`,
+                    count,
+                    rawGrade: grade === '其他' ? 99 : parseInt(grade)
+                })).sort((a, b) => a.rawGrade - b.rawGrade);
+            }, [approvedRecords]);
+
+            const maxGradeCount = gradeStats.length > 0 ? Math.max(...gradeStats.map(s => s.count)) : 1;
+
+            // 3. 最新心得
+            const latestReviews = useMemo(() => {
+                return [...approvedRecords]
+                    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+                    .slice(0, 4); // 首頁顯示最新 4 筆
+            }, [approvedRecords]);
+
+            // ==========================================================
 
             return (
                 <div className="min-h-screen pb-32">
@@ -217,46 +273,133 @@
                                     )}
                                 </div>
 
-                                {/* 🌟 新增：毛毛蟲蛻變系統說明 */}
+                                {/* 毛毛蟲蛻變系統說明 */}
                                 <div className="bg-white rounded-[2.5rem] p-8 border card-shadow">
                                     <h3 className="text-2xl font-black text-center mb-8 flex justify-center items-center gap-3">
                                         <span className="text-4xl animate-float">🦋</span> 閱讀歷程：毛毛蟲的蛻變之旅
                                     </h3>
-                                    
-                                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-10">
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                                         {[10, 30, 60, 61].map((count, i) => {
                                             const stage = getReadingStage(count);
                                             return (
-                                                <div key={i} className={`p-6 rounded-[2rem] border-2 border-transparent hover:border-slate-200 transition-all text-center ${stage.bg}`}>
-                                                    <div className="text-5xl mb-4 animate-float" style={{animationDelay: `${i*0.2}s`}}>{stage.emoji}</div>
-                                                    <h4 className={`text-xl font-black mb-2 ${stage.textColor}`}>{stage.name}</h4>
-                                                    <p className="text-slate-500 font-bold text-sm mb-3">{stage.desc}</p>
-                                                    <span className="bg-white px-3 py-1 rounded-full text-xs font-black shadow-sm text-slate-600">
+                                                <div key={i} className={`p-4 md:p-6 rounded-[2rem] border-2 border-transparent text-center ${stage.bg}`}>
+                                                    <div className="text-4xl md:text-5xl mb-3 animate-float" style={{animationDelay: `${i*0.2}s`}}>{stage.emoji}</div>
+                                                    <h4 className={`text-lg md:text-xl font-black mb-1 ${stage.textColor}`}>{stage.name}</h4>
+                                                    <p className="text-slate-500 font-bold text-xs md:text-sm mb-3">{stage.desc}</p>
+                                                    <span className="bg-white px-3 py-1 rounded-full text-[10px] md:text-xs font-black shadow-sm text-slate-600">
                                                         {count === 61 ? '60+ 本書' : `${stage.min}-${stage.max} 本書`}
                                                     </span>
                                                 </div>
                                             );
                                         })}
                                     </div>
-
-                                    <div className="bg-slate-50 p-6 md:p-8 rounded-[2rem] border border-slate-100">
-                                        <h4 className="font-black text-lg mb-4 text-slate-700 border-l-4 border-amber-500 pl-3">✨ 閱讀護照功能特色 ✨</h4>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-y-4 gap-x-8">
-                                            <p className="flex items-center gap-2 font-bold text-slate-600"><span className="text-xl">📊</span> 即時個人統計：顯示累計閱讀本數與下一目標</p>
-                                            <p className="flex items-center gap-2 font-bold text-slate-600"><span className="text-xl">🎯</span> 進度追蹤：專屬各階段的動態進度條特效</p>
-                                            <p className="flex items-center gap-2 font-bold text-slate-600"><span className="text-xl">📚</span> 完整記錄：依時間倒序排列，清楚掌握歷程</p>
-                                            <p className="flex items-center gap-2 font-bold text-slate-600"><span className="text-xl">🏆</span> 達人證書：完成 41 本書後自動解鎖個人專屬證書</p>
-                                            <p className="flex items-center gap-2 font-bold text-slate-600"><span className="text-xl">🗑️</span> 刪除功能：學生可自行刪除錯誤的打卡記錄</p>
-                                            <p className="flex items-center gap-2 font-bold text-slate-600"><span className="text-xl">🎨</span> 美觀介面：流暢的動畫與漸層色彩引導閱讀樂趣</p>
-                                        </div>
-                                    </div>
                                 </div>
 
-                                {/* 統計看板 */}
+                                {/* 總計面板 */}
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     <div className="bg-white p-6 rounded-[2rem] border card-shadow flex flex-col items-center justify-center relative overflow-hidden"><div className="absolute -right-4 -top-4 opacity-5"><Icon name="book" size={100}/></div><p className="text-slate-500 font-black text-sm mb-1 z-10">全校閱讀總冊數</p><p className="text-5xl font-black text-amber-500 z-10">{approvedRecords.length}</p></div>
                                     <div className="bg-white p-6 rounded-[2rem] border card-shadow flex flex-col items-center justify-center relative overflow-hidden"><div className="absolute -right-4 -top-4 opacity-5"><Icon name="pen-tool" size={100}/></div><p className="text-slate-500 font-black text-sm mb-1 z-10">累積心得篇數</p><p className="text-5xl font-black text-indigo-500 z-10">{approvedRecords.length}</p></div>
                                     <div className="bg-white p-6 rounded-[2rem] border card-shadow flex flex-col items-center justify-center relative overflow-hidden"><div className="absolute -right-4 -top-4 opacity-5"><Icon name="users" size={100}/></div><p className="text-slate-500 font-black text-sm mb-1 z-10">參加學生數</p><p className="text-5xl font-black text-green-500 z-10">{new Set(approvedRecords.map(r => `${r.classId}_${r.name}`)).size}</p></div>
+                                </div>
+
+                                {/* 🌟 新增：排行榜與大數據分析 */}
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-4">
+                                    
+                                    {/* 排行榜 Top 10 */}
+                                    <div className="bg-white p-6 md:p-8 rounded-[2rem] border card-shadow col-span-1">
+                                        <h3 className="text-xl font-black mb-6 flex items-center gap-2 text-slate-800">
+                                            <Icon name="award" className="text-amber-500"/> 閱讀小達人 (Top 10)
+                                        </h3>
+                                        <div className="space-y-3">
+                                            {leaderboard.length === 0 ? (
+                                                <p className="text-center text-slate-400 font-bold py-6">目前還沒有資料喔！</p>
+                                            ) : (
+                                                leaderboard.map((student, idx) => {
+                                                    const isTop3 = idx < 3;
+                                                    const medals = ['🥇', '🥈', '🥉'];
+                                                    return (
+                                                        <div key={idx} className={`flex items-center justify-between p-3 rounded-2xl border ${isTop3 ? 'bg-amber-50/50 border-amber-100' : 'bg-slate-50 border-slate-100'}`}>
+                                                            <div className="flex items-center gap-3">
+                                                                <span className={`w-6 text-center font-black ${isTop3 ? 'text-lg' : 'text-slate-400'}`}>
+                                                                    {isTop3 ? medals[idx] : `${idx + 1}.`}
+                                                                </span>
+                                                                <div>
+                                                                    <div className="text-xs font-bold text-slate-400">{student.classId}</div>
+                                                                    <div className="text-sm font-black text-slate-700">{maskName(student.name)}</div>
+                                                                </div>
+                                                            </div>
+                                                            <div className="text-right">
+                                                                <div className="font-black text-amber-600 text-lg">{student.count} <span className="text-xs text-slate-500 font-bold">本</span></div>
+                                                            </div>
+                                                        </div>
+                                                    )
+                                                })
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* 各年級閱讀量 & 最新心得 */}
+                                    <div className="col-span-1 lg:col-span-2 flex flex-col gap-6">
+                                        
+                                        {/* 年級圖表分析 */}
+                                        <div className="bg-white p-6 md:p-8 rounded-[2rem] border card-shadow">
+                                            <h3 className="text-xl font-black mb-6 flex items-center gap-2 text-slate-800">
+                                                <Icon name="bar-chart-2" className="text-indigo-500"/> 各年級閱讀量分析
+                                            </h3>
+                                            <div className="space-y-4">
+                                                {gradeStats.length === 0 ? (
+                                                    <p className="text-center text-slate-400 font-bold py-4">目前還沒有資料喔！</p>
+                                                ) : (
+                                                    gradeStats.map(stat => (
+                                                        <div key={stat.grade} className="flex items-center gap-4 group">
+                                                            <span className="w-16 font-bold text-slate-600 text-sm">{stat.grade}</span>
+                                                            <div className="flex-1 h-5 bg-slate-100 rounded-full overflow-hidden border border-slate-200 shadow-inner">
+                                                                <div 
+                                                                    className="h-full bg-gradient-to-r from-indigo-400 to-sky-400 rounded-full transition-all duration-1000 ease-out group-hover:opacity-80" 
+                                                                    style={{ width: `${(stat.count / maxGradeCount) * 100}%` }}
+                                                                ></div>
+                                                            </div>
+                                                            <span className="w-12 text-right font-black text-slate-700">{stat.count} 本</span>
+                                                        </div>
+                                                    ))
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* 最新心得分享 */}
+                                        <div className="bg-white p-6 md:p-8 rounded-[2rem] border card-shadow flex-1">
+                                            <div className="flex justify-between items-center mb-6">
+                                                <h3 className="text-xl font-black flex items-center gap-2 text-slate-800">
+                                                    <Icon name="message-square" className="text-green-500"/> 最新心得分享
+                                                </h3>
+                                                <button onClick={() => setIsAllReviewsOpen(true)} className="text-sm font-bold text-amber-600 hover:text-white bg-amber-50 hover:bg-amber-500 px-4 py-2 rounded-xl transition-colors shadow-sm flex items-center gap-1">
+                                                    其它 More... <Icon name="chevron-right" size={16}/>
+                                                </button>
+                                            </div>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                {latestReviews.length === 0 ? (
+                                                    <p className="text-center text-slate-400 font-bold py-4 col-span-2">還沒有人分享心得喔！</p>
+                                                ) : (
+                                                    latestReviews.map(r => (
+                                                        <div key={r.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:border-amber-300 hover:shadow-md transition-all cursor-pointer group" onClick={() => setDetail(r)}>
+                                                            <div className="flex justify-between items-start mb-2">
+                                                                <span className="text-[10px] font-black bg-white px-2 py-1 rounded-md text-slate-500 border shadow-sm">
+                                                                    {r.classId} {maskName(r.name)}
+                                                                </span>
+                                                                <span className="text-[10px] text-slate-400 font-bold">
+                                                                    {new Date(r.timestamp).toLocaleDateString('zh-TW')}
+                                                                </span>
+                                                            </div>
+                                                            <h4 className="font-black text-slate-800 mb-1 truncate group-hover:text-amber-600 transition-colors">《{r.bookTitle}》</h4>
+                                                            <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed">
+                                                                {r.reviewType === 'image' ? '🖼️ (分享了一張圖片心得，點擊查看)' : r.review}
+                                                            </p>
+                                                        </div>
+                                                    ))
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         )}
@@ -275,77 +418,32 @@
                                 </div>
                             ) : (
                                 <div className="space-y-6 animate-in slide-in-from-bottom-8 duration-500">
-                                    
-                                    {/* 🌟 新增：毛毛蟲蛻變動態進度區塊 */}
                                     <div className={`rounded-[3rem] p-8 md:p-10 border text-center shadow-lg relative overflow-hidden ${currentStage.bg}`}>
                                         <div className="absolute top-0 right-0 w-40 h-40 bg-white rounded-full blur-3xl -mr-10 -mt-10 opacity-40"></div>
-                                        
                                         <div className="flex flex-col md:flex-row items-center justify-between gap-6 relative z-10">
                                             <div className="flex items-center gap-6">
-                                                <div className="text-7xl bg-white w-28 h-28 rounded-full flex items-center justify-center shadow-md border-4 border-white/50 animate-float">
-                                                    {currentStage.emoji}
-                                                </div>
+                                                <div className="text-7xl bg-white w-28 h-28 rounded-full flex items-center justify-center shadow-md border-4 border-white/50 animate-float">{currentStage.emoji}</div>
                                                 <div className="text-left">
                                                     <h3 className="text-3xl font-black text-slate-800 mb-1">{student.name} 同學</h3>
-                                                    <p className={`font-bold text-lg ${currentStage.textColor}`}>
-                                                        當前階段：{currentStage.name} ({currentStage.desc})
-                                                    </p>
-                                                    <div className="mt-2 inline-flex items-center gap-2 bg-white/60 px-3 py-1.5 rounded-xl font-black text-slate-700 shadow-sm border border-white">
-                                                        累積審核通過：<span className="text-2xl text-amber-600">{myApprovedCount}</span> 本
-                                                    </div>
+                                                    <p className={`font-bold text-lg ${currentStage.textColor}`}>當前階段：{currentStage.name} ({currentStage.desc})</p>
+                                                    <div className="mt-2 inline-flex items-center gap-2 bg-white/60 px-3 py-1.5 rounded-xl font-black text-slate-700 shadow-sm border border-white">累積審核通過：<span className="text-2xl text-amber-600">{myApprovedCount}</span> 本</div>
                                                 </div>
                                             </div>
-
-                                            {myApprovedCount >= 41 && (
-                                                <button onClick={() => setShowCertificate(true)} className="px-6 py-4 bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-500 hover:to-orange-600 text-white font-black rounded-2xl shadow-lg hover:scale-105 transition-all flex items-center gap-2 animate-bounce">
-                                                    🏆 觀看達人證書
-                                                </button>
-                                            )}
+                                            {myApprovedCount >= 41 && (<button onClick={() => setShowCertificate(true)} className="px-6 py-4 bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-500 hover:to-orange-600 text-white font-black rounded-2xl shadow-lg hover:scale-105 transition-all flex items-center gap-2 animate-bounce">🏆 觀看達人證書</button>)}
                                         </div>
-
-                                        {/* 進度條 */}
                                         <div className="mt-8 bg-white/60 p-5 rounded-2xl shadow-inner border border-white">
-                                            <div className="flex justify-between text-sm font-black text-slate-500 mb-2 px-1">
-                                                <span>進度：{myApprovedCount} 本</span>
-                                                <span>{currentStage.next === 'MAX' ? '已達最高成就！' : `下一目標：${currentStage.next} 本`}</span>
-                                            </div>
-                                            <div className="h-6 w-full bg-slate-200/50 rounded-full overflow-hidden shadow-inner">
-                                                <div className={`h-full rounded-full bg-gradient-to-r ${currentStage.color} transition-all duration-1000 ease-out relative`} style={{ width: `${currentStage.progress}%` }}>
-                                                    <div className="absolute inset-0 bg-white/20 w-full animate-[pulse_2s_ease-in-out_infinite]"></div>
-                                                </div>
-                                            </div>
+                                            <div className="flex justify-between text-sm font-black text-slate-500 mb-2 px-1"><span>進度：{myApprovedCount} 本</span><span>{currentStage.next === 'MAX' ? '已達最高成就！' : `下一目標：${currentStage.next} 本`}</span></div>
+                                            <div className="h-6 w-full bg-slate-200/50 rounded-full overflow-hidden shadow-inner"><div className={`h-full rounded-full bg-gradient-to-r ${currentStage.color} transition-all duration-1000 ease-out relative`} style={{ width: `${currentStage.progress}%` }}><div className="absolute inset-0 bg-white/20 w-full animate-[pulse_2s_ease-in-out_infinite]"></div></div></div>
                                         </div>
-
-                                        <button onClick={() => { setIsEditMode(false); setFormData({id:null, bookTitle:'', author:'', publisher:'', pages:'', reviewType:'text', review:'', image:'', status:'pending'}); setIsFormOpen(true); }} className="w-full mt-6 py-5 bg-slate-800 hover:bg-slate-900 text-white font-black text-xl rounded-2xl shadow-xl flex items-center justify-center gap-3 hover:scale-[1.02] transition-all relative z-10">
-                                            <Icon name="pen-tool" size={24}/> 填寫新讀書心得
-                                        </button>
+                                        <button onClick={() => { setIsEditMode(false); setFormData({id:null, bookTitle:'', author:'', publisher:'', pages:'', reviewType:'text', review:'', image:'', status:'pending'}); setIsFormOpen(true); }} className="w-full mt-6 py-5 bg-slate-800 hover:bg-slate-900 text-white font-black text-xl rounded-2xl shadow-xl flex items-center justify-center gap-3 hover:scale-[1.02] transition-all relative z-10"><Icon name="pen-tool" size={24}/> 填寫新讀書心得</button>
                                     </div>
-
-                                    {/* 歷史紀錄與刪除功能 */}
                                     <div className="bg-white p-8 rounded-[3rem] border card-shadow">
-                                        <div className="flex justify-between items-center mb-6">
-                                            <h3 className="font-black text-xl flex items-center gap-2"><Icon name="clock" className="text-slate-400"/> 歷史寫作紀錄</h3>
-                                            <button onClick={()=>{setStudent({ classId: '', name: '' }); setIsLoggedIn(false); setView('home');}} className="text-xs font-black text-rose-500 bg-rose-50 hover:bg-rose-100 px-4 py-2 rounded-xl transition-colors">登出</button>
-                                        </div>
+                                        <div className="flex justify-between items-center mb-6"><h3 className="font-black text-xl flex items-center gap-2"><Icon name="clock" className="text-slate-400"/> 歷史寫作紀錄</h3><button onClick={()=>{setStudent({ classId: '', name: '' }); setIsLoggedIn(false); setView('home');}} className="text-xs font-black text-rose-500 bg-rose-50 hover:bg-rose-100 px-4 py-2 rounded-xl transition-colors">登出</button></div>
                                         <div className="space-y-3">
                                             {myRecords.map(r => (
                                                 <div key={r.id} className="p-5 bg-slate-50 rounded-2xl flex justify-between items-center hover:bg-white hover:shadow-md border border-transparent hover:border-slate-200 transition-all group">
-                                                    <div className="cursor-pointer flex-1" onClick={() => setDetail(r)}>
-                                                        <p className="font-black text-slate-700 text-lg group-hover:text-amber-600 transition-colors">《{r.bookTitle}》</p>
-                                                        <p className="text-xs text-slate-400 font-bold mt-1">{r.timestamp ? new Date(r.timestamp).toLocaleDateString('zh-TW') : ''}</p>
-                                                    </div>
-                                                    <div className="flex items-center gap-3 shrink-0">
-                                                        {r.reviewType === 'image' && <Icon name="image" size={18} className="text-indigo-400"/>}
-                                                        <span className={`text-xs font-black px-3 py-1.5 rounded-xl ${r.status==='approved'?'text-green-600 bg-green-100':'text-amber-600 bg-amber-100'}`}>{r.status==='approved'?'已通過':'審核中'}</span>
-                                                        {/* 🌟 新增：學生端專屬刪除按鈕 */}
-                                                        <button 
-                                                            onClick={(e) => { e.stopPropagation(); if(confirm(`確定要刪除《${r.bookTitle}》這筆打卡紀錄嗎？`)) handleBackendAction('deleteRecord', r.id); }} 
-                                                            className="p-2 bg-rose-50 hover:bg-rose-500 text-rose-400 hover:text-white rounded-lg transition-colors"
-                                                            title="刪除錯誤紀錄"
-                                                        >
-                                                            <Icon name="trash-2" size={16}/>
-                                                        </button>
-                                                    </div>
+                                                    <div className="cursor-pointer flex-1" onClick={() => setDetail(r)}><p className="font-black text-slate-700 text-lg group-hover:text-amber-600 transition-colors">《{r.bookTitle}》</p><p className="text-xs text-slate-400 font-bold mt-1">{r.timestamp ? new Date(r.timestamp).toLocaleDateString('zh-TW') : ''}</p></div>
+                                                    <div className="flex items-center gap-3 shrink-0">{r.reviewType === 'image' && <Icon name="image" size={18} className="text-indigo-400"/>}<span className={`text-xs font-black px-3 py-1.5 rounded-xl ${r.status==='approved'?'text-green-600 bg-green-100':'text-amber-600 bg-amber-100'}`}>{r.status==='approved'?'已通過':'審核中'}</span><button onClick={(e) => { e.stopPropagation(); if(confirm(`確定要刪除《${r.bookTitle}》嗎？`)) handleBackendAction('deleteRecord', r.id); }} className="p-2 bg-rose-50 hover:bg-rose-500 text-rose-400 hover:text-white rounded-lg transition-colors"><Icon name="trash-2" size={16}/></button></div>
                                                 </div>
                                             ))}
                                             {myRecords.length === 0 && <div className="text-center py-10 text-slate-400 font-bold border-2 border-dashed border-slate-200 rounded-[2rem]">還沒有閱讀紀錄喔，趕快開始第一本書吧！</div>}
@@ -355,7 +453,7 @@
                             )
                         )}
 
-                        {/* ======================= 管理員後台 (保持原樣，僅壓縮空間) ======================= */}
+                        {/* ======================= 管理員後台 ======================= */}
                         {view === 'admin' && (
                             !isAdmin ? (
                                 <div className="bg-white p-12 rounded-[3rem] shadow-xl border max-w-md mx-auto mt-6 text-center animate-in zoom-in duration-300">
@@ -396,80 +494,86 @@
                         )}
                     </main>
 
-                    {/* 導覽列與共用 Modal (填寫表單、詳細內容、動畫) 維持原樣，新增證書 Modal */}
                     <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-[360px] glass rounded-full p-2 flex shadow-[0_20px_40px_-15px_rgba(0,0,0,0.2)] border border-white/50 z-50">
                         {['home','passport','admin'].map(v => (<button key={v} onClick={() => setView(v)} className={`flex-1 flex flex-col items-center py-3.5 rounded-full transition-all duration-300 ${view===v?'nav-active scale-105':'text-slate-400 hover:text-amber-500'}`}><Icon name={v==='home'?'home':v==='passport'?'user':'shield'} size={22}/><span className="text-[10px] font-black mt-1.5 tracking-widest">{v==='home'?'首頁':v==='passport'?'個人':'管理'}</span></button>))}
                     </nav>
 
-                    {/* 🌟 新增：達人證書視窗 */}
+                    {/* 🌟 新增：所有學生心得牆 (More Modal) */}
+                    {isAllReviewsOpen && (
+                        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[120] flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={()=>setIsAllReviewsOpen(false)}>
+                            <div className="bg-white w-full max-w-5xl rounded-[3rem] p-6 md:p-10 shadow-2xl relative flex flex-col max-h-[90vh]" onClick={e=>e.stopPropagation()}>
+                                <button onClick={()=>setIsAllReviewsOpen(false)} className="absolute top-6 right-6 p-3 bg-slate-100 rounded-full hover:bg-slate-200"><Icon name="x" size={24}/></button>
+                                <h3 className="text-2xl md:text-3xl font-black mb-6 flex items-center gap-3 text-slate-800 border-b-2 border-slate-100 pb-4">
+                                    <Icon name="book-open" className="text-amber-500" size={32}/> 興嘉小達人心得牆
+                                </h3>
+                                <div className="overflow-y-auto custom-scrollbar pr-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-10">
+                                    {approvedRecords.slice().reverse().map(r => (
+                                        <div key={r.id} className="p-5 bg-slate-50 rounded-[2rem] border border-slate-100 hover:border-amber-300 hover:shadow-lg transition-all cursor-pointer flex flex-col" onClick={() => { setIsAllReviewsOpen(false); setDetail(r); }}>
+                                            <div className="flex justify-between items-start mb-3">
+                                                <span className="text-xs font-black bg-white px-3 py-1.5 rounded-xl text-slate-600 border shadow-sm flex items-center gap-1">
+                                                    <Icon name="user" size={12}/> {r.classId} {maskName(r.name)}
+                                                </span>
+                                                <span className="text-xs text-slate-400 font-bold bg-slate-200/50 px-2 py-1 rounded-lg">
+                                                    {new Date(r.timestamp).toLocaleDateString('zh-TW')}
+                                                </span>
+                                            </div>
+                                            <h4 className="font-black text-slate-800 mb-2 text-lg line-clamp-1">《{r.bookTitle}》</h4>
+                                            <div className="text-sm text-slate-600 line-clamp-3 bg-white p-3 rounded-xl border border-slate-100 flex-1">
+                                                {r.reviewType === 'image' ? <div className="flex items-center justify-center h-full text-indigo-400 font-bold gap-2"><Icon name="image"/> 點擊查看精美圖片心得</div> : r.review}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 達人證書視窗 */}
                     {showCertificate && (
                         <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md z-[150] flex items-center justify-center p-4 animate-in zoom-in duration-300" onClick={()=>setShowCertificate(false)}>
                             <div className="bg-amber-50 w-full max-w-2xl cert-border rounded-xl p-8 md:p-12 text-center shadow-[0_0_50px_rgba(245,158,11,0.5)] relative overflow-hidden" onClick={e=>e.stopPropagation()}>
                                 <button onClick={()=>setShowCertificate(false)} className="absolute top-4 right-4 p-2 bg-white rounded-full hover:bg-slate-200"><Icon name="x" size={24}/></button>
                                 <div className="absolute top-0 left-0 w-32 h-32 bg-amber-400 blur-[80px] opacity-50"></div>
                                 <div className="absolute bottom-0 right-0 w-32 h-32 bg-orange-500 blur-[80px] opacity-50"></div>
-                                
                                 <div className="relative z-10">
                                     <div className="text-7xl mb-4 animate-bounce">🏆</div>
                                     <h2 className="text-4xl font-black text-amber-600 mb-2 tracking-widest">興嘉閱讀小達人</h2>
                                     <h3 className="text-2xl font-black text-slate-800 mb-8 border-b-2 border-amber-300 pb-4 mx-10">榮 譽 證 書</h3>
-                                    
-                                    <p className="text-xl font-bold text-slate-600 mb-6 leading-relaxed">
-                                        特此證明 <br/><span className="text-3xl font-black text-indigo-600 underline decoration-amber-400 decoration-4 underline-offset-8 inline-block my-4">{student.classId} {student.name}</span><br/>同學
-                                    </p>
-                                    <p className="text-lg font-bold text-slate-700 mb-10">
-                                        熱愛閱讀，積極探索知識的海洋<br/>
-                                        已成功完成 <span className="text-2xl font-black text-rose-500 mx-1">{myApprovedCount}</span> 本好書的閱讀與寫作<br/>
-                                        順利蛻變為 <span className="text-2xl font-black text-sky-500 mx-1">🦋 成蟲期 (展翅飛翔)</span><br/>
-                                        特發此證，以茲鼓勵！
-                                    </p>
-                                    
-                                    <div className="flex justify-center items-center gap-12 mt-12 text-sm font-black text-slate-400">
-                                        <div className="text-center"><div className="w-16 h-16 rounded-full border-4 border-amber-500 mx-auto flex items-center justify-center mb-2"><Icon name="check" size={24} className="text-amber-500"/></div>興嘉閱讀護照系統</div>
-                                        <div className="text-center"><div className="w-16 h-16 rounded-full border-4 border-rose-500 mx-auto flex items-center justify-center mb-2"><Icon name="star" size={24} className="text-rose-500"/></div>閱讀小達人認證</div>
-                                    </div>
+                                    <p className="text-xl font-bold text-slate-600 mb-6 leading-relaxed">特此證明 <br/><span className="text-3xl font-black text-indigo-600 underline decoration-amber-400 decoration-4 underline-offset-8 inline-block my-4">{student.classId} {student.name}</span><br/>同學</p>
+                                    <p className="text-lg font-bold text-slate-700 mb-10">熱愛閱讀，積極探索知識的海洋<br/>已成功完成 <span className="text-2xl font-black text-rose-500 mx-1">{myApprovedCount}</span> 本好書的閱讀與寫作<br/>順利蛻變為 <span className="text-2xl font-black text-sky-500 mx-1">🦋 成蟲期 (展翅飛翔)</span><br/>特發此證，以茲鼓勵！</p>
+                                    <div className="flex justify-center items-center gap-12 mt-12 text-sm font-black text-slate-400"><div className="text-center"><div className="w-16 h-16 rounded-full border-4 border-amber-500 mx-auto flex items-center justify-center mb-2"><Icon name="check" size={24} className="text-amber-500"/></div>興嘉閱讀護照系統</div><div className="text-center"><div className="w-16 h-16 rounded-full border-4 border-rose-500 mx-auto flex items-center justify-center mb-2"><Icon name="star" size={24} className="text-rose-500"/></div>閱讀小達人認證</div></div>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* 填寫表單 Modal (維持原樣) */}
+                    {/* 填寫表單 Modal */}
                     {isFormOpen && (
                         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
                             <div className="bg-white w-full max-w-3xl rounded-[3rem] p-8 md:p-12 max-h-[90vh] overflow-y-auto shadow-2xl relative custom-scrollbar">
                                 <button onClick={()=>setIsFormOpen(false)} className="absolute top-8 right-8 p-3 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><Icon name="x" size={24}/></button>
                                 <h3 className="text-3xl font-black mb-10 text-slate-800 flex items-center gap-3"><Icon name="edit" className="text-amber-500"/> {isEditMode ? '修改心得作品' : '發表心得紀錄'}</h3>
                                 <div className="space-y-8">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        <div><label className="field-label">書名 <span className="text-rose-500">*</span></label><input className="field-input" value={formData.bookTitle} onChange={e=>setFormData({...formData, bookTitle:e.target.value})}/></div>
-                                        <div><label className="field-label">作者 <span className="text-rose-500">*</span></label><input className="field-input" value={formData.author} onChange={e=>setFormData({...formData, author:e.target.value})}/></div>
-                                        <div><label className="field-label">出版社 <span className="text-rose-500">*</span></label><input className="field-input" value={formData.publisher} onChange={e=>setFormData({...formData, publisher:e.target.value})}/></div>
-                                        <div><label className="field-label">頁數 <span className="text-rose-500">*</span></label><input type="number" className="field-input" value={formData.pages} onChange={e=>setFormData({...formData, pages:e.target.value})}/></div>
-                                    </div>
-                                    <div className="pt-8 border-t-2 border-slate-100">
-                                        <label className="field-label mb-4">繳交方式 <span className="text-rose-500">*</span></label>
-                                        <div className="flex bg-slate-100 p-2 rounded-2xl gap-2 mb-6"><button className={`flex-1 py-4 rounded-xl font-black text-lg transition-all flex items-center justify-center gap-2 ${formData.reviewType === 'text' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500'}`} onClick={()=>setFormData({...formData, reviewType:'text'})}><Icon name="type" size={20}/> 文字心得</button><button className={`flex-1 py-4 rounded-xl font-black text-lg transition-all flex items-center justify-center gap-2 ${formData.reviewType === 'image' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500'}`} onClick={()=>setFormData({...formData, reviewType:'image'})}><Icon name="camera" size={20}/> 拍照上傳</button></div>
-                                        {formData.reviewType === 'text' ? (<textarea className="field-input field-textarea mt-2" value={formData.review} onChange={e=>setFormData({...formData, review:e.target.value})} placeholder="請寫下感想..."></textarea>) : (<div className="border-4 border-dashed border-slate-200 rounded-[2rem] p-8 text-center bg-slate-50">{formData.image ? (<div className="relative"><img src={formData.image} className="max-h-80 mx-auto rounded-xl shadow-md border"/><button className="absolute -top-4 -right-4 bg-rose-500 text-white p-3 rounded-full" onClick={()=>setFormData({...formData, image:''})}><Icon name="x" size={20}/></button></div>) : (<label className="cursor-pointer flex flex-col items-center justify-center space-y-4 py-8"><div className="w-20 h-20 bg-indigo-100 text-indigo-500 rounded-full flex items-center justify-center"><Icon name="camera" size={36}/></div><span className="text-2xl font-black text-slate-700">點此拍照或選擇相片</span><input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleImageUpload} /></label>)}</div>)}
-                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div><label className="field-label">書名 <span className="text-rose-500">*</span></label><input className="field-input" value={formData.bookTitle} onChange={e=>setFormData({...formData, bookTitle:e.target.value})}/></div><div><label className="field-label">作者 <span className="text-rose-500">*</span></label><input className="field-input" value={formData.author} onChange={e=>setFormData({...formData, author:e.target.value})}/></div><div><label className="field-label">出版社 <span className="text-rose-500">*</span></label><input className="field-input" value={formData.publisher} onChange={e=>setFormData({...formData, publisher:e.target.value})}/></div><div><label className="field-label">頁數 <span className="text-rose-500">*</span></label><input type="number" className="field-input" value={formData.pages} onChange={e=>setFormData({...formData, pages:e.target.value})}/></div></div>
+                                    <div className="pt-8 border-t-2 border-slate-100"><label className="field-label mb-4">繳交方式 <span className="text-rose-500">*</span></label><div className="flex bg-slate-100 p-2 rounded-2xl gap-2 mb-6"><button className={`flex-1 py-4 rounded-xl font-black text-lg transition-all flex items-center justify-center gap-2 ${formData.reviewType === 'text' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500'}`} onClick={()=>setFormData({...formData, reviewType:'text'})}><Icon name="type" size={20}/> 文字心得</button><button className={`flex-1 py-4 rounded-xl font-black text-lg transition-all flex items-center justify-center gap-2 ${formData.reviewType === 'image' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500'}`} onClick={()=>setFormData({...formData, reviewType:'image'})}><Icon name="camera" size={20}/> 拍照上傳</button></div>{formData.reviewType === 'text' ? (<textarea className="field-input field-textarea mt-2" value={formData.review} onChange={e=>setFormData({...formData, review:e.target.value})} placeholder="請寫下感想..."></textarea>) : (<div className="border-4 border-dashed border-slate-200 rounded-[2rem] p-8 text-center bg-slate-50">{formData.image ? (<div className="relative"><img src={formData.image} className="max-h-80 mx-auto rounded-xl shadow-md border"/><button className="absolute -top-4 -right-4 bg-rose-500 text-white p-3 rounded-full" onClick={()=>setFormData({...formData, image:''})}><Icon name="x" size={20}/></button></div>) : (<label className="cursor-pointer flex flex-col items-center justify-center space-y-4 py-8"><div className="w-20 h-20 bg-indigo-100 text-indigo-500 rounded-full flex items-center justify-center"><Icon name="camera" size={36}/></div><span className="text-2xl font-black text-slate-700">點此拍照或選擇相片</span><input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleImageUpload} /></label>)}</div>)}</div>
                                     <button className="w-full py-8 bg-amber-500 hover:bg-amber-600 text-white text-2xl font-black rounded-[2rem] shadow-xl hover:-translate-y-1 transition-all mt-8 flex items-center justify-center gap-3" onClick={handleFormSubmit}><Icon name="send" size={28}/> 確認送出</button>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* 詳細內容 Modal (維持原樣) */}
+                    {/* 詳細內容 Modal */}
                     {detail && (
-                        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[110] flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={()=>setDetail(null)}>
+                        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[130] flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={()=>setDetail(null)}>
                             <div className="bg-white w-full max-w-2xl rounded-[3rem] p-8 md:p-12 shadow-2xl relative max-h-[90vh] overflow-y-auto custom-scrollbar" onClick={e=>e.stopPropagation()}>
                                 <button onClick={()=>setDetail(null)} className="absolute top-6 right-6 p-3 bg-slate-100 rounded-full hover:bg-slate-200"><Icon name="x" size={24}/></button>
-                                <div className="mb-8 border-b-2 border-slate-100 pb-6 pr-12"><h3 className="text-3xl font-black text-slate-800 leading-tight">《{detail.bookTitle}》</h3><div className="flex flex-wrap gap-4 mt-5"><span className="bg-amber-100 text-amber-700 px-3 py-1.5 rounded-xl font-black">{detail.classId} {mask(detail.name)}</span><span className="bg-slate-100 text-slate-600 px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5"><Icon name="user" size={14}/> {detail.author}</span></div></div>
+                                <div className="mb-8 border-b-2 border-slate-100 pb-6 pr-12"><h3 className="text-3xl font-black text-slate-800 leading-tight">《{detail.bookTitle}》</h3><div className="flex flex-wrap gap-4 mt-5"><span className="bg-amber-100 text-amber-700 px-3 py-1.5 rounded-xl font-black">{detail.classId} {maskName(detail.name)}</span><span className="bg-slate-100 text-slate-600 px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5"><Icon name="user" size={14}/> {detail.author}</span></div></div>
                                 <div className="bg-slate-50 p-6 md:p-8 rounded-[2.5rem] mb-8 text-lg font-medium text-slate-700 border border-slate-100 shadow-inner">{detail.reviewType === 'image' || (detail.image && detail.image.startsWith('data:')) ? (<div className="text-center space-y-4"><div className="inline-flex items-center gap-2 bg-indigo-100 text-indigo-600 px-4 py-2 rounded-full text-sm font-black mb-2"><Icon name="camera" size={16}/> 照片心得</div><img src={detail.image} className="w-full rounded-2xl shadow-md border border-slate-200"/></div>) : (<p className="whitespace-pre-wrap">{detail.review}</p>)}</div>
                                 <button className="w-full bg-slate-800 hover:bg-slate-900 py-5 rounded-2xl text-white font-black text-xl shadow-xl transition-colors" onClick={()=>setDetail(null)}>關閉視窗</button>
                             </div>
                         </div>
                     )}
 
-                    {/* 載入動畫 (維持原樣) */}
                     {loading && (
                         <div className="fixed inset-0 bg-white/80 backdrop-blur-sm z-[200] flex flex-col items-center justify-center animate-in fade-in duration-200"><div className="relative w-24 h-24 mb-6"><div className="absolute inset-0 border-8 border-amber-200 rounded-full"></div><div className="absolute inset-0 border-8 border-amber-500 border-t-transparent rounded-full animate-spin"></div><Icon name="book-open" size={32} className="absolute inset-0 m-auto text-amber-500 animate-pulse"/></div><div className="font-black text-amber-500 text-xl tracking-widest animate-pulse">{currentLoadingText}</div></div>
                     )}
